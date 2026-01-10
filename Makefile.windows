@@ -1,0 +1,59 @@
+.PHONY: help install install-dev test test-cov format lint type-check clean build upload docs dev check
+
+help:
+	@echo "SecretsManager - Makefile (Windows)"
+	@echo ""
+	@echo "Comandos disponíveis:"
+	@echo "  make -f Makefile.windows install      - Sincroniza dependências"
+	@echo "  make -f Makefile.windows install-dev  - Sincroniza dependências de desenvolvimento"
+	@echo "  make -f Makefile.windows test         - Executa testes"
+	@echo "  make -f Makefile.windows test-cov     - Executa testes com coverage"
+	@echo "  make -f Makefile.windows format       - Formata código com black e isort"
+	@echo "  make -f Makefile.windows lint         - Verifica código com flake8"
+	@echo "  make -f Makefile.windows type-check   - Verifica tipos com mypy"
+	@echo "  make -f Makefile.windows clean        - Limpa arquivos temporários"
+	@echo "  make -f Makefile.windows build        - Cria distribuição do pacote"
+	@echo "  make -f Makefile.windows upload       - Faz upload para PyPI (requer credenciais)"
+	@echo "  make -f Makefile.windows docs         - Gera documentação"
+
+install:
+	uv sync
+
+install-dev:
+	uv sync --extra dev
+
+test:
+	uv run pytest -v
+
+test-cov:
+	uv run pytest -v --cov=secrets_manager --cov-report=term-missing --cov-report=html
+
+format:
+	uv run black src/ tests/ examples/
+	uv run isort src/ tests/ examples/
+
+lint:
+	uv run flake8 src/ tests/ --max-line-length=100 --extend-ignore=E203,W503
+
+type-check:
+	uv run mypy src/
+
+clean:
+	powershell -NoProfile -Command "$$paths = @('build','dist','.pytest_cache','.mypy_cache','htmlcov','.coverage'); $$paths += (Get-ChildItem -Force -Filter '*.egg-info' -ErrorAction SilentlyContinue | ForEach-Object { $$_.FullName }); foreach ($$p in $$paths) { if (Test-Path $$p) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $$p } }"
+	powershell -NoProfile -Command "Get-ChildItem -Recurse -Directory -Filter __pycache__ -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"
+	powershell -NoProfile -Command "Get-ChildItem -Recurse -File -Filter *.pyc -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue"
+
+build: clean
+	uv build
+
+upload: build
+	uv publish
+
+docs:
+	@echo "Documentação disponível no README.md"
+	@echo "Para mais documentação, consulte a pasta docs/"
+
+dev: install-dev
+
+check: format lint type-check test-cov
+	@echo "✅ Todas as verificações passaram!"
