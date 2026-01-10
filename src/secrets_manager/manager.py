@@ -63,7 +63,7 @@ class SecretsManager:
         # Valida configuração
         self._validate_configuration()
 
-    def _validate_configuration(self):
+    def _validate_configuration(self) -> None:
         """Valida que a configuração está correta."""
         # Tenta carregar todas as configurações
         configs = self._load_all_key_configs()
@@ -320,7 +320,7 @@ class SecretsManager:
         new_key: str,
         new_salt: Optional[bytes] = None,
         persist_to_file: Optional[str] = None,
-    ):
+    ) -> None:
         """Adiciona nova versão e a marca como ativa.
 
         Args:
@@ -370,7 +370,7 @@ class SecretsManager:
 
         self._logger.info(f"Rotação completa para versão: {new_version_normalized}")
 
-    def _persist_to_env_file(self, filename: str, version: str, key: str, salt: bytes):
+    def _persist_to_env_file(self, filename: str, version: str, key: str, salt: bytes) -> None:
         """Atualiza arquivo .env mantendo outras variáveis.
 
         Args:
@@ -410,7 +410,7 @@ class SecretsManager:
 
         self._logger.info(f"Configuração persistida em: {filename}")
 
-    def _audit(self, event: str, metadata: dict):
+    def _audit(self, event: str, metadata: dict) -> None:
         """Registra evento de auditoria se callback configurado.
 
         Args:
@@ -435,7 +435,7 @@ class SecretsManager:
         """
         return self._stats.copy()
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Limpa todos os caches.
 
         Útil para testes ou após mudança de configuração.

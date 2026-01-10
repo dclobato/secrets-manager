@@ -3,7 +3,7 @@
 import hashlib
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Self
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class KeyConfiguration:
     salt: bytes
     salt_hash: Optional[str] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Valida integridade após inicialização."""
         if self.salt_hash:
             computed = hashlib.sha256(self.salt).hexdigest()
@@ -54,7 +54,7 @@ class SecretsConfig:
     audit_callback: Optional[Callable] = None
     logger: Optional[Any] = None  # logging.Logger
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Valida configuração após inicialização."""
         if not self.keys:
             raise ValueError("Pelo menos uma chave deve ser configurada")
@@ -79,8 +79,8 @@ class SecretsConfig:
         salt_prefix: str = "ENCRYPTION_SALT",
         salt_hash_prefix: str = "ENCRYPTION_SALT_HASH",
         active_version_key: str = "ACTIVE_ENCRYPTION_VERSION",
-        **kwargs,
-    ) -> "SecretsConfig":
+        **kwargs: Any,
+    ) -> Self:
         """Cria configuração a partir de variáveis de ambiente.
 
         Formato esperado:
