@@ -37,12 +37,12 @@ def test_key_configuration_integrity():
     salt_hash = hashlib.sha256(salt).hexdigest()
 
     # Hash correto - não deve levantar exceção
-    config = KeyConfiguration(version="1", key="k", salt=salt, salt_hash=salt_hash)
+    config = KeyConfiguration(version="1", key=bytearray(b"k"), salt=salt, salt_hash=salt_hash)
     assert config.salt == salt
 
     # Hash incorreto - deve levantar exceção
     with pytest.raises(ValueError, match="Integridade do salt comprometida"):
-        KeyConfiguration(version="1", key="k", salt=salt, salt_hash="hash-errado")
+        KeyConfiguration(version="1", key=bytearray(b"k"), salt=salt, salt_hash="hash-errado")
 
 
 def test_secrets_config_validation():
@@ -331,3 +331,88 @@ def test_secrets_manager_salt_integrity_disabled():
     manager = SecretsManager(config)
     key_config = manager._load_key_config("v1")
     assert key_config.salt == salt
+
+
+def test_secrets_manager_cleanup():
+    """Testa limpeza segura de dados sensíveis da memória."""
+    config = SecretsConfig(
+        keys={"v1": {"key": "secret-key", "salt": "salt"}}, active_version="v1"
+    )
+    manager = SecretsManager(config)
+
+    # Carregar configs no cache
+    manager._load_key_config("v1")
+
+    assert len(manager._config_cache) > 0
+
+    # Cleanup
+    manager.cleanup()
+
+    # Verificar que caches foram limpos
+    assert len(manager._config_cache) == 0
+    assert len(manager._fernet_cache) == 0
+
+
+def test_key_configuration_cleanup():
+    """Testa que cleanup sobrescreve a chave com zeros."""
+    key = bytearray(b"sensitive-key-data")
+    config = KeyConfiguration(version="v1", key=key, salt=b"salt")
+
+    # Verificar que chave existe
+    assert len(config.key) > 0
+    assert config.key != bytearray(len(config.key))
+
+    # Cleanup
+    config.cleanup()
+
+    # Verificar que foi zerada
+    assert config.key == bytearray(len(config.key))
+
+
+def test_atomic_counter_thread_safety():
+    """Testa que AtomicCounter é thread-safe."""
+    import threading
+
+    from secrets_manager.manager import AtomicCounter
+
+    counter = AtomicCounter()
+
+    def increment_1000_times():
+        for _ in range(1000):
+            counter.increment()
+
+    # 10 threads incrementando 1000 vezes cada
+    threads = [threading.Thread(target=increment_1000_times) for _ in range(10)]
+
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Deve ser exatamente 10000 (sem race conditions)
+    assert counter.value() == 10000
+
+
+def test_secrets_manager_concurrent_statistics():
+    """Testa que estatísticas são precisas sob operações concorrentes."""
+    import threading
+
+    config = SecretsConfig(keys={"v1": {"key": "k", "salt": "s"}}, active_version="v1")
+    manager = SecretsManager(config)
+
+    def encrypt_10_times():
+        for _ in range(10):
+            manager.encrypt(b"test data")
+
+    # 5 threads criptografando 10 vezes cada
+    threads = [threading.Thread(target=encrypt_10_times) for _ in range(5)]
+
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    stats = manager.get_statistics()
+
+    # Deve ser exatamente 50 sem perder nenhuma atualização
+    assert stats["encryptions"] == 50
