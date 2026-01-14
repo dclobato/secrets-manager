@@ -11,7 +11,8 @@ Thread-safe secrets manager with Fernet encryption, multi-version key rotation, 
 - **Key Rotation**: multi-version key management with fallback
 - **PBKDF2 Derivation**: key derivation from passwords
 - **Salt Integrity**: optional SHA256 validation
-- **Thread-Safe**: RLock-protected caches
+- **Thread-Safe**: RLock-protected caches and atomic statistics counters
+- **Secure Memory Management**: Uses `bytearray` for keys with cleanup support
 - **Auditability**: optional audit callbacks
 - **Statistics**: basic metrics tracking
 - **Environment Persistence**: save/load keys from `.env` files
@@ -40,6 +41,52 @@ uv add SecretsManager
 uv sync --extra dev
 ```
 
+## Security Features
+
+### Secure Key Storage with bytearray
+
+SecretsManager uses `bytearray` instead of immutable `str` for storing cryptographic keys in memory. This provides:
+
+- **Memory Overwriting**: Keys can be securely zeroed when no longer needed
+- **Reduced Exposure Window**: Minimizes risk of key exposure in memory dumps
+- **Best-Effort Security**: While Python's garbage collector limitations mean we can't guarantee complete removal, this approach significantly reduces the attack surface
+
+### Memory Cleanup
+
+Always call `cleanup()` when you're done with the SecretsManager to securely clear sensitive data:
+
+```python
+from secrets_manager import SecretsConfig, SecretsManager
+
+config = SecretsConfig(
+    keys={"v1": {"key": "my-secret-password", "salt": "random-salt-value"}},
+    active_version="v1",
+)
+
+manager = SecretsManager(config)
+
+# ... use manager ...
+
+# Securely clear keys from memory
+manager.cleanup()
+```
+
+**When to call cleanup():**
+- Before shutting down your application
+- After key rotation in high-security environments
+- When disposing of SecretsManager instances
+
+### Thread-Safe Statistics
+
+All statistics tracking uses atomic counters to prevent race conditions under concurrent access:
+
+```python
+stats = manager.get_statistics()
+# Accurate even with multiple threads calling encrypt/decrypt simultaneously
+print(f"Encryptions: {stats['encryptions']}")
+print(f"Decryptions: {stats['decryptions']}")
+```
+
 ## Quick Start
 
 ```python
@@ -59,6 +106,9 @@ manager = SecretsManager(config)
 
 version, ciphertext = manager.encrypt(b"sensitive data")
 version, plaintext = manager.decrypt(ciphertext)
+
+# Clean up when done
+manager.cleanup()
 ```
 
 ## Key Rotation Example
@@ -83,6 +133,9 @@ manager.rotate_to_new_version(
 _, ciphertext_v2 = manager.encrypt(b"new data")
 manager.decrypt(ciphertext_v1)
 manager.decrypt(ciphertext_v2)
+
+# Clean up when done
+manager.cleanup()
 ```
 
 ## Advanced Features
