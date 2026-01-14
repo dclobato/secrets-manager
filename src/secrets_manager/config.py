@@ -64,8 +64,9 @@ class KeyConfiguration:
 
         After calling cleanup(), this KeyConfiguration instance should not be used.
         """
-        # Use object.__setattr__ to modify frozen dataclass
         # Zero out the bytearray in place
+        # Note: bytearray is mutable, so we can modify its contents even in a frozen dataclass
+        # The frozen attribute only prevents reassigning the reference, not modifying the object
         if self.key:
             for i in range(len(self.key)):
                 self.key[i] = 0
