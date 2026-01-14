@@ -331,3 +331,123 @@ def test_secrets_manager_salt_integrity_disabled():
     manager = SecretsManager(config)
     key_config = manager._load_key_config("v1")
     assert key_config.salt == salt
+
+
+def test_atomic_counter_thread_safety():
+    """Testa que AtomicCounter é thread-safe."""
+    import threading
+    from secrets_manager.manager import AtomicCounter
+
+    counter = AtomicCounter()
+    num_threads = 10
+    increments_per_thread = 100
+
+    def increment_counter():
+        for _ in range(increments_per_thread):
+            counter.increment()
+
+    threads = []
+    for _ in range(num_threads):
+        thread = threading.Thread(target=increment_counter)
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    # Se o contador fosse não thread-safe, poderíamos perder updates
+    # Com thread-safety, deve ser exatamente num_threads * increments_per_thread
+    assert counter.value() == num_threads * increments_per_thread
+
+
+def test_atomic_counter_basic():
+    """Testa operações básicas do AtomicCounter."""
+    from secrets_manager.manager import AtomicCounter
+
+    counter = AtomicCounter()
+    assert counter.value() == 0
+
+    counter.increment()
+    assert counter.value() == 1
+
+    counter.increment()
+    counter.increment()
+    assert counter.value() == 3
+
+
+def test_key_configuration_cleanup():
+    """Testa que KeyConfiguration.cleanup() zera a chave."""
+    key_str = "my-secret-key"
+    key_bytearray = bytearray(key_str.encode("utf-8"))
+
+    config = KeyConfiguration(
+        version="v1",
+        key=key_bytearray,
+        salt=b"salt123",
+    )
+
+    # Verificar que a chave está presente antes do cleanup
+    assert len(config.key) == len(key_str)
+    assert bytes(config.key) == key_str.encode("utf-8")
+
+    # Chamar cleanup
+    config.cleanup()
+
+    # Verificar que a chave foi zerada
+    assert all(b == 0 for b in config.key)
+    assert bytes(config.key) == b"\x00" * len(key_str)
+
+
+def test_secrets_manager_cleanup():
+    """Testa que SecretsManager.cleanup() limpa todas as chaves."""
+    config = SecretsConfig(
+        keys={
+            "v1": {"key": "key1", "salt": "salt1"},
+            "v2": {"key": "key2", "salt": "salt2"},
+        },
+        active_version="v1",
+    )
+
+    manager = SecretsManager(config)
+
+    # Carregar configs para popular cache
+    key_config_v1 = manager._load_key_config("v1")
+    key_config_v2 = manager._load_key_config("v2")
+
+    # Verificar que as chaves estão no cache
+    assert len(manager._config_cache) == 2
+
+    # Verificar que as chaves não estão zeradas
+    assert not all(b == 0 for b in key_config_v1.key)
+    assert not all(b == 0 for b in key_config_v2.key)
+
+    # Chamar cleanup
+    manager.cleanup()
+
+    # Verificar que os caches foram limpos
+    assert len(manager._config_cache) == 0
+    assert len(manager._fernet_cache) == 0
+
+    # Verificar que as chaves foram zeradas (nas instâncias originais)
+    assert all(b == 0 for b in key_config_v1.key)
+    assert all(b == 0 for b in key_config_v2.key)
+
+
+def test_secrets_manager_bytearray_key_usage():
+    """Testa que chaves são armazenadas como bytearray."""
+    config = SecretsConfig(
+        keys={"v1": {"key": "test-key", "salt": "test-salt"}},
+        active_version="v1",
+    )
+
+    manager = SecretsManager(config)
+    key_config = manager._load_key_config("v1")
+
+    # Verificar que a chave é bytearray
+    assert isinstance(key_config.key, bytearray)
+
+    # Verificar que criptografia/descriptografia ainda funcionam
+    plaintext = b"test data"
+    version, ciphertext = manager.encrypt(plaintext)
+    _, decrypted = manager.decrypt(ciphertext)
+    assert decrypted == plaintext

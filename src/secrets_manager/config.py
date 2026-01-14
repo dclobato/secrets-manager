@@ -10,15 +10,24 @@ from typing import Any, Callable, Dict, Optional, Self
 class KeyConfiguration:
     """Configuração imutável e validada de uma versão de chave.
 
+    SECURITY NOTE: This class uses bytearray instead of str for the cryptographic key
+    to enable secure memory cleanup. Unlike str (which is immutable in Python),
+    bytearray is mutable and can be zeroed out when no longer needed, reducing the
+    window where sensitive key material remains in memory.
+
+    While Python's garbage collector may still leave copies in memory (due to internal
+    string interning, reference counting, etc.), using bytearray provides best-effort
+    security by allowing explicit cleanup via the cleanup() method.
+
     Attributes:
         version: Nome da versão (e.g., "v1", "v2")
-        key: Chave de criptografia (será derivada com PBKDF2)
+        key: Chave de criptografia como bytearray (será derivada com PBKDF2)
         salt: Salt para derivação (bytes)
         salt_hash: Hash SHA256 do salt para validação de integridade (opcional)
     """
 
     version: str
-    key: str
+    key: bytearray
     salt: bytes
     salt_hash: Optional[str] = None
 
@@ -31,6 +40,35 @@ class KeyConfiguration:
                     f"Integridade do salt comprometida para versão {self.version}. "
                     f"Hash esperado: {self.salt_hash}, calculado: {computed}"
                 )
+
+    def cleanup(self) -> None:
+        """Securely zero out the encryption key in memory.
+
+        SECURITY NOTE: This method overwrites the key bytearray with zeros
+        to minimize the time sensitive cryptographic material remains in memory.
+
+        Call this method when:
+        - The application is shutting down
+        - After key rotation (for old keys)
+        - When the key is no longer needed
+
+        IMPORTANT: This is best-effort security in Python. Due to:
+        - Python's reference counting and garbage collector
+        - Potential string interning during bytearray creation
+        - Memory manager optimizations
+        - Operating system memory management
+
+        There's no guarantee that all copies of the key material are removed
+        from memory. However, this significantly reduces the attack surface
+        compared to using immutable str objects.
+
+        After calling cleanup(), this KeyConfiguration instance should not be used.
+        """
+        # Use object.__setattr__ to modify frozen dataclass
+        # Zero out the bytearray in place
+        if self.key:
+            for i in range(len(self.key)):
+                self.key[i] = 0
 
 
 @dataclass
