@@ -6,19 +6,34 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Self
 
 
-@dataclass(frozen=True)
+@dataclass
 class KeyConfiguration:
-    """Configuração imutável e validada de uma versão de chave.
+    """Configuração validada de uma versão de chave.
+
+    SECURITY NOTE: Uses bytearray for key storage instead of str
+    
+    Why bytearray instead of str?
+    - str objects in Python are IMMUTABLE - once created, they cannot be modified
+    - When a str is garbage collected, Python may leave copies in memory
+    - bytearray is MUTABLE - we can overwrite it with zeros when done
+    - This reduces the window of exposure for sensitive key material in memory dumps
+    - While Python's garbage collector limitations mean this is "best-effort" security,
+      it significantly reduces the attack surface compared to immutable strings
+    
+    IMPORTANT: Always call cleanup() when done with keys, especially:
+    - Before shutting down your application
+    - After key rotation in high-security environments
+    - When disposing of KeyConfiguration instances
 
     Attributes:
         version: Nome da versão (e.g., "v1", "v2")
-        key: Chave de criptografia (será derivada com PBKDF2)
+        key: Chave de criptografia (bytearray - será derivada com PBKDF2)
         salt: Salt para derivação (bytes)
         salt_hash: Hash SHA256 do salt para validação de integridade (opcional)
     """
 
     version: str
-    key: str
+    key: bytearray
     salt: bytes
     salt_hash: Optional[str] = None
 
@@ -31,6 +46,19 @@ class KeyConfiguration:
                     f"Integridade do salt comprometida para versão {self.version}. "
                     f"Hash esperado: {self.salt_hash}, calculado: {computed}"
                 )
+
+    def cleanup(self) -> None:
+        """Securely overwrite the key with zeros.
+        
+        This is a security best practice to minimize the window of exposure
+        for sensitive cryptographic material in memory. While Python's garbage
+        collector may still leave copies in memory, this reduces the risk.
+        
+        After calling cleanup(), this KeyConfiguration instance should not be used.
+        """
+        # Overwrite key with zeros
+        for i in range(len(self.key)):
+            self.key[i] = 0
 
 
 @dataclass

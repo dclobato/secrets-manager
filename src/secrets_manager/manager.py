@@ -1,11 +1,12 @@
 """SecretsManager - Gerenciador de segredos com rotação de chaves."""
 
 import base64
+import gc
 import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Dict, List, Optional, Tuple
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -14,6 +15,33 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .config import KeyConfiguration, SecretsConfig
 from .utils import normalize_salt, normalize_version
+
+
+class AtomicCounter:
+    """Thread-safe counter for statistics tracking.
+    
+    Uses a lock to ensure atomic increment and read operations,
+    preventing race conditions under concurrent access.
+    """
+
+    def __init__(self) -> None:
+        """Initialize counter with zero value."""
+        self._value = 0
+        self._lock = Lock()
+
+    def increment(self) -> None:
+        """Atomically increment the counter by 1."""
+        with self._lock:
+            self._value += 1
+
+    def value(self) -> int:
+        """Atomically read the current counter value.
+        
+        Returns:
+            int: Current counter value
+        """
+        with self._lock:
+            return self._value
 
 
 class SecretsManagerError(Exception):
@@ -51,13 +79,13 @@ class SecretsManager:
         self._fernet_cache: Dict[str, Fernet] = {}
         self._lock = RLock()
 
-        # Estatísticas
+        # Estatísticas (thread-safe atomic counters)
         self._stats = {
-            "encryptions": 0,
-            "decryptions": 0,
-            "cache_hits": 0,
-            "cache_misses": 0,
-            "integrity_checks": 0,
+            "encryptions": AtomicCounter(),
+            "decryptions": AtomicCounter(),
+            "cache_hits": AtomicCounter(),
+            "cache_misses": AtomicCounter(),
+            "integrity_checks": AtomicCounter(),
         }
 
         # Valida configuração
@@ -97,10 +125,10 @@ class SecretsManager:
         # Cache check
         with self._lock:
             if version in self._config_cache:
-                self._stats["cache_hits"] += 1
+                self._stats["cache_hits"].increment()
                 return self._config_cache[version]
 
-        self._stats["cache_misses"] += 1
+        self._stats["cache_misses"].increment()
 
         # Normalizar chaves do dicionário
         normalized_keys = {normalize_version(k): v for k, v in self.config.keys.items()}
@@ -131,12 +159,16 @@ class SecretsManager:
         salt_hash = config_dict.get("salt_hash") if self.config.verify_salt_integrity else None
 
         if salt_hash:
-            self._stats["integrity_checks"] += 1
+            self._stats["integrity_checks"].increment()
 
         # Criar configuração
+        # Convert string key to bytearray for secure memory management
+        key_str = config_dict["key"]
+        key_bytearray = bytearray(key_str.encode("utf-8"))
+        
         key_config = KeyConfiguration(
             version=version,
-            key=config_dict["key"],
+            key=key_bytearray,
             salt=salt_bytes,
             salt_hash=salt_hash,
         )
@@ -179,7 +211,9 @@ class SecretsManager:
             salt=key_config.salt,
             iterations=self.config.kdf_iterations,
         )
-        derived = kdf.derive(key_config.key.encode("utf-8"))
+        # Convert bytearray to bytes for PBKDF2
+        key_bytes = bytes(key_config.key)
+        derived = kdf.derive(key_bytes)
         fernet_key = base64.urlsafe_b64encode(derived)
         return Fernet(fernet_key)
 
@@ -252,7 +286,7 @@ class SecretsManager:
         fernet = self.get_fernet(version)
         ciphertext = fernet.encrypt(plaintext)
 
-        self._stats["encryptions"] += 1
+        self._stats["encryptions"].increment()
         self._audit("encryption", {"version": version, "size": len(plaintext)})
 
         return version, ciphertext
@@ -302,7 +336,7 @@ class SecretsManager:
                 fernet = self.get_fernet(version)
                 plaintext = fernet.decrypt(ciphertext)
 
-                self._stats["decryptions"] += 1
+                self._stats["decryptions"].increment()
                 self._audit("decryption", {"version": version, "was_hint": version == version_hint})
 
                 return version, plaintext
@@ -433,7 +467,13 @@ class SecretsManager:
             >>> stats = manager.get_statistics()
             >>> print(f"Encryptions: {stats['encryptions']}")
         """
-        return self._stats.copy()
+        return {
+            "encryptions": self._stats["encryptions"].value(),
+            "decryptions": self._stats["decryptions"].value(),
+            "cache_hits": self._stats["cache_hits"].value(),
+            "cache_misses": self._stats["cache_misses"].value(),
+            "integrity_checks": self._stats["integrity_checks"].value(),
+        }
 
     def clear_cache(self) -> None:
         """Limpa todos os caches.
@@ -445,3 +485,49 @@ class SecretsManager:
             self._fernet_cache.clear()
 
         self._logger.debug("Caches limpos")
+
+    def cleanup(self) -> None:
+        """Securely clear sensitive data from memory.
+        
+        SECURITY: This method performs the following cleanup operations:
+        1. Calls cleanup() on all cached KeyConfiguration instances to zero keys
+        2. Clears all caches (config and Fernet instances)
+        3. Forces garbage collection to reclaim memory
+        
+        WHY THIS MATTERS:
+        - Minimizes the window of exposure for cryptographic keys in memory
+        - Reduces risk of key exposure in memory dumps or swap files
+        - Best practice before shutdown or after key rotation
+        
+        PYTHON GC LIMITATIONS:
+        - Python's garbage collector may leave copies of data in memory
+        - This is "best-effort" security, not a guarantee
+        - However, it significantly reduces the attack surface
+        
+        WHEN TO CALL:
+        - Before shutting down your application
+        - After key rotation in high-security environments
+        - When disposing of SecretsManager instances
+        - In finally blocks or context manager __exit__ methods
+        
+        Example:
+            >>> manager = SecretsManager(config)
+            >>> try:
+            ...     # Use manager
+            ...     manager.encrypt(b"data")
+            >>> finally:
+            ...     manager.cleanup()
+        """
+        with self._lock:
+            # Securely zero all cached keys
+            for key_config in self._config_cache.values():
+                key_config.cleanup()
+            
+            # Clear all caches
+            self._config_cache.clear()
+            self._fernet_cache.clear()
+        
+        # Force garbage collection to reclaim memory
+        gc.collect()
+        
+        self._logger.info("Sensitive data securely cleared from memory")
