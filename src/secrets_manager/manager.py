@@ -1,11 +1,12 @@
 """SecretsManager - Gerenciador de segredos com rotação de chaves."""
 
 import base64
+import gc
 import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Dict, List, Optional, Tuple
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -20,6 +21,42 @@ class SecretsManagerError(Exception):
     """Erro específico do gerenciador de segredos."""
 
     pass
+
+
+class AtomicCounter:
+    """Contador thread-safe para rastreamento de estatísticas.
+
+    NOTA DE SEGURANÇA: Esta classe fornece operações atômicas de incremento e leitura
+    para prevenir condições de corrida ao atualizar estatísticas sob acesso concorrente.
+    Sem bloqueio, a operação de incremento (ler-modificar-escrever) poderia perder
+    atualizações quando múltiplas threads acessam o mesmo contador simultaneamente.
+    """
+
+    def __init__(self) -> None:
+        """Inicializa contador em zero com um lock para sincronização."""
+        self._value = 0
+        self._lock = Lock()
+
+    def increment(self) -> None:
+        """Incrementa atomicamente o contador em 1.
+
+        Este método é thread-safe e garante que nenhuma atualização seja perdida
+        mesmo sob alta concorrência.
+        """
+        with self._lock:
+            self._value += 1
+
+    def value(self) -> int:
+        """Lê atomicamente o valor atual do contador.
+
+        Returns:
+            int: Valor atual do contador
+
+        Este método é thread-safe e garante uma captura consistente
+        do valor do contador.
+        """
+        with self._lock:
+            return self._value
 
 
 class SecretsManager:
@@ -51,13 +88,13 @@ class SecretsManager:
         self._fernet_cache: Dict[str, Fernet] = {}
         self._lock = RLock()
 
-        # Estatísticas
-        self._stats = {
-            "encryptions": 0,
-            "decryptions": 0,
-            "cache_hits": 0,
-            "cache_misses": 0,
-            "integrity_checks": 0,
+        # Estatísticas (thread-safe)
+        self._stats: Dict[str, AtomicCounter] = {
+            "encryptions": AtomicCounter(),
+            "decryptions": AtomicCounter(),
+            "cache_hits": AtomicCounter(),
+            "cache_misses": AtomicCounter(),
+            "integrity_checks": AtomicCounter(),
         }
 
         # Valida configuração
@@ -97,10 +134,10 @@ class SecretsManager:
         # Cache check
         with self._lock:
             if version in self._config_cache:
-                self._stats["cache_hits"] += 1
+                self._stats["cache_hits"].increment()
                 return self._config_cache[version]
 
-        self._stats["cache_misses"] += 1
+        self._stats["cache_misses"].increment()
 
         # Normalizar chaves do dicionário
         normalized_keys = {normalize_version(k): v for k, v in self.config.keys.items()}
@@ -131,12 +168,18 @@ class SecretsManager:
         salt_hash = config_dict.get("salt_hash") if self.config.verify_salt_integrity else None
 
         if salt_hash:
-            self._stats["integrity_checks"] += 1
+            self._stats["integrity_checks"].increment()
+
+        # NOTA DE SEGURANÇA: Converte chave string para bytearray para limpeza segura de memória
+        # A chave começa como string da configuração, mas convertemos para bytearray
+        # para permitir zerar a memória quando cleanup() for chamado
+        key_str = config_dict["key"]
+        key_bytearray = bytearray(key_str.encode("utf-8"))
 
         # Criar configuração
         key_config = KeyConfiguration(
             version=version,
-            key=config_dict["key"],
+            key=key_bytearray,
             salt=salt_bytes,
             salt_hash=salt_hash,
         )
@@ -167,6 +210,9 @@ class SecretsManager:
     def _derive_fernet(self, key_config: KeyConfiguration) -> Fernet:
         """Deriva chave Fernet usando PBKDF2.
 
+        NOTA DE SEGURANÇA: A chave é armazenada como bytearray para limpeza segura.
+        Convertemos para bytes para a operação KDF.
+
         Args:
             key_config: Configuração da chave
 
@@ -179,7 +225,9 @@ class SecretsManager:
             salt=key_config.salt,
             iterations=self.config.kdf_iterations,
         )
-        derived = kdf.derive(key_config.key.encode("utf-8"))
+        # Converte bytearray para bytes para KDF
+        key_bytes = bytes(key_config.key)
+        derived = kdf.derive(key_bytes)
         fernet_key = base64.urlsafe_b64encode(derived)
         return Fernet(fernet_key)
 
@@ -252,7 +300,7 @@ class SecretsManager:
         fernet = self.get_fernet(version)
         ciphertext = fernet.encrypt(plaintext)
 
-        self._stats["encryptions"] += 1
+        self._stats["encryptions"].increment()
         self._audit("encryption", {"version": version, "size": len(plaintext)})
 
         return version, ciphertext
@@ -302,7 +350,7 @@ class SecretsManager:
                 fernet = self.get_fernet(version)
                 plaintext = fernet.decrypt(ciphertext)
 
-                self._stats["decryptions"] += 1
+                self._stats["decryptions"].increment()
                 self._audit("decryption", {"version": version, "was_hint": version == version_hint})
 
                 return version, plaintext
@@ -433,7 +481,7 @@ class SecretsManager:
             >>> stats = manager.get_statistics()
             >>> print(f"Encryptions: {stats['encryptions']}")
         """
-        return self._stats.copy()
+        return {key: counter.value() for key, counter in self._stats.items()}
 
     def clear_cache(self) -> None:
         """Limpa todos os caches.
@@ -445,3 +493,55 @@ class SecretsManager:
             self._fernet_cache.clear()
 
         self._logger.debug("Caches limpos")
+
+    def cleanup(self) -> None:
+        """Limpa de forma segura material criptográfico sensível da memória.
+
+        NOTA DE SEGURANÇA: Este método realiza limpeza de melhor esforço de material
+        de chave sensível da memória através de:
+        1. Chamar cleanup() em todas as instâncias KeyConfiguration em cache para zerar suas chaves
+        2. Limpar todos os caches (configurações e instâncias Fernet)
+        3. Forçar coleta de lixo para recuperar memória
+
+        Chame este método quando:
+        - Aplicação estiver sendo encerrada
+        - Após rotação de chaves (para limpar chaves antigas)
+        - Periodicamente como parte do enrijecimento de segurança
+
+        LIMITAÇÕES IMPORTANTES:
+        - Gerenciamento de memória do Python pode manter cópias de strings na memória
+        - O coletor de lixo não garante recuperação imediata de memória
+        - Sistema operacional pode cachear páginas de memória
+        - Isto fornece defesa em profundidade mas não é à prova de falhas
+
+        Melhores práticas:
+        - Chamar cleanup() antes do encerramento da aplicação
+        - Após cleanup(), criar uma nova instância de SecretsManager se necessário
+        - Considerar criptografia de memória a nível de SO para segurança adicional
+
+        Exemplo:
+            >>> manager = SecretsManager(config)
+            >>> # ... usar manager para criptografia/descriptografia ...
+            >>> manager.cleanup()  # Antes de encerrar ou rotacionar chaves
+        """
+        with self._lock:
+            # Zera chaves em todas as configurações em cache
+            for key_config in self._config_cache.values():
+                try:
+                    key_config.cleanup()
+                except Exception as e:
+                    self._logger.warning(
+                        f"Erro ao limpar configuração de chave para versão "
+                        f"{key_config.version}: {e}"
+                    )
+
+            # Limpa todos os caches
+            self._config_cache.clear()
+            self._fernet_cache.clear()
+
+        # Força coleta de lixo para recuperar memória
+        gc.collect()
+
+        self._logger.info(
+            "Limpeza de segurança concluída: todas as chaves em cache zeradas e caches limpos"
+        )

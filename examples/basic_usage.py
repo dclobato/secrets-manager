@@ -85,6 +85,11 @@ def main():
     for v in versions:
         print(f"   - {v}")
 
+    # 10. Limpar material criptográfico sensível
+    print("\n9. Limpando material sensível da memória...")
+    manager.cleanup()
+    print("   ✓ Limpeza de segurança concluída")
+
     print("\n=== Fim do exemplo ===\n")
 
 

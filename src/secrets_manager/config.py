@@ -2,7 +2,7 @@
 
 import hashlib
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Self
 
 
@@ -10,15 +10,24 @@ from typing import Any, Callable, Dict, Optional, Self
 class KeyConfiguration:
     """Configuração imutável e validada de uma versão de chave.
 
+    NOTA DE SEGURANÇA: Esta classe usa bytearray ao invés de str para a chave criptográfica
+    para permitir limpeza segura de memória. Diferente de str (que é imutável em Python),
+    bytearray é mutável e pode ser zerado quando não for mais necessário, reduzindo a
+    janela onde material de chave sensível permanece na memória.
+
+    Embora o coletor de lixo do Python ainda possa deixar cópias na memória (devido a
+    internação de strings, contagem de referências, etc.), usar bytearray fornece segurança
+    de melhor esforço ao permitir limpeza explícita via método cleanup().
+
     Attributes:
         version: Nome da versão (e.g., "v1", "v2")
-        key: Chave de criptografia (será derivada com PBKDF2)
+        key: Chave de criptografia como bytearray (será derivada com PBKDF2)
         salt: Salt para derivação (bytes)
         salt_hash: Hash SHA256 do salt para validação de integridade (opcional)
     """
 
     version: str
-    key: str
+    key: bytearray
     salt: bytes
     salt_hash: Optional[str] = None
 
@@ -31,6 +40,37 @@ class KeyConfiguration:
                     f"Integridade do salt comprometida para versão {self.version}. "
                     f"Hash esperado: {self.salt_hash}, calculado: {computed}"
                 )
+
+    def cleanup(self) -> None:
+        """Zera de forma segura a chave de criptografia na memória.
+
+        NOTA DE SEGURANÇA: Este método sobrescreve o bytearray da chave com zeros
+        para minimizar o tempo que material criptográfico sensível permanece na memória.
+
+        Chame este método quando:
+        - A aplicação estiver sendo encerrada
+        - Após rotação de chaves (para chaves antigas)
+        - Quando a chave não for mais necessária
+
+        IMPORTANTE: Esta é segurança de melhor esforço em Python. Devido a:
+        - Contagem de referências e coletor de lixo do Python
+        - Potencial internação de strings durante criação do bytearray
+        - Otimizações do gerenciador de memória
+        - Gerenciamento de memória do sistema operacional
+
+        Não há garantia de que todas as cópias do material de chave sejam removidas
+        da memória. No entanto, isto reduz significativamente a superfície de ataque
+        comparado ao uso de objetos str imutáveis.
+
+        Após chamar cleanup(), esta instância KeyConfiguration não deve ser usada.
+        """
+        # Zera o bytearray no local
+        # Nota: bytearray é mutável, então podemos modificar seu conteúdo mesmo
+        # em um dataclass frozen. O atributo frozen apenas previne reatribuir a
+        # referência, não modificar o objeto
+        if self.key:
+            for i in range(len(self.key)):
+                self.key[i] = 0
 
 
 @dataclass
