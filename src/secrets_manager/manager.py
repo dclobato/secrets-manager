@@ -212,6 +212,10 @@ class SecretsManager:
             iterations=self.config.kdf_iterations,
         )
         # Convert bytearray to bytes for PBKDF2
+        # NOTE: This creates a short-lived copy of the key in memory.
+        # The cryptography library's PBKDF2 requires bytes, not bytearray.
+        # This is an acceptable security trade-off as the copy is temporary
+        # and will be garbage collected after derive() completes.
         key_bytes = bytes(key_config.key)
         derived = kdf.derive(key_bytes)
         fernet_key = base64.urlsafe_b64encode(derived)

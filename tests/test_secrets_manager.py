@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import logging
+import threading
 
 import pytest
 
@@ -13,6 +14,7 @@ from secrets_manager import (
     SecretsManagerError,
     normalize_salt,
 )
+from secrets_manager.manager import AtomicCounter
 
 
 def test_normalize_salt():
@@ -368,10 +370,6 @@ def test_key_configuration_cleanup():
 
 def test_atomic_counter_thread_safety():
     """Testa que AtomicCounter é thread-safe."""
-    import threading
-
-    from secrets_manager.manager import AtomicCounter
-
     counter = AtomicCounter()
 
     def increment_1000_times():
@@ -392,8 +390,6 @@ def test_atomic_counter_thread_safety():
 
 def test_secrets_manager_concurrent_statistics():
     """Testa que estatísticas são precisas sob operações concorrentes."""
-    import threading
-
     config = SecretsConfig(keys={"v1": {"key": "k", "salt": "s"}}, active_version="v1")
     manager = SecretsManager(config)
 
