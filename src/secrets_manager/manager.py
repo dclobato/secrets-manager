@@ -541,6 +541,4 @@ class SecretsManager:
         # Force garbage collection to reclaim memory
         gc.collect()
 
-        self._logger.info(
-            "Security cleanup completed: all cached keys zeroed and caches cleared"
-        )
+        self._logger.info("Security cleanup completed: all cached keys zeroed and caches cleared")

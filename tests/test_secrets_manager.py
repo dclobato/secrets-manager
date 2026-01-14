@@ -3,7 +3,6 @@
 import base64
 import hashlib
 import logging
-from pathlib import Path
 
 import pytest
 
@@ -336,6 +335,7 @@ def test_secrets_manager_salt_integrity_disabled():
 def test_atomic_counter_thread_safety():
     """Testa que AtomicCounter é thread-safe."""
     import threading
+
     from secrets_manager.manager import AtomicCounter
 
     counter = AtomicCounter()
