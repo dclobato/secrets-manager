@@ -3,7 +3,6 @@
 import base64
 import hashlib
 import logging
-from pathlib import Path
 
 import pytest
 
@@ -335,9 +334,7 @@ def test_secrets_manager_salt_integrity_disabled():
 
 def test_secrets_manager_cleanup():
     """Testa limpeza segura de dados sensíveis da memória."""
-    config = SecretsConfig(
-        keys={"v1": {"key": "secret-key", "salt": "salt"}}, active_version="v1"
-    )
+    config = SecretsConfig(keys={"v1": {"key": "secret-key", "salt": "salt"}}, active_version="v1")
     manager = SecretsManager(config)
 
     # Carregar configs no cache

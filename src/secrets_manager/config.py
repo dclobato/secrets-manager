@@ -2,7 +2,7 @@
 
 import hashlib
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Self
 
 
@@ -11,7 +11,7 @@ class KeyConfiguration:
     """Configuração validada de uma versão de chave.
 
     SECURITY NOTE: Uses bytearray for key storage instead of str
-    
+
     Why bytearray instead of str?
     - str objects in Python are IMMUTABLE - once created, they cannot be modified
     - When a str is garbage collected, Python may leave copies in memory
@@ -19,7 +19,7 @@ class KeyConfiguration:
     - This reduces the window of exposure for sensitive key material in memory dumps
     - While Python's garbage collector limitations mean this is "best-effort" security,
       it significantly reduces the attack surface compared to immutable strings
-    
+
     IMPORTANT: Always call cleanup() when done with keys, especially:
     - Before shutting down your application
     - After key rotation in high-security environments
@@ -49,11 +49,11 @@ class KeyConfiguration:
 
     def cleanup(self) -> None:
         """Securely overwrite the key with zeros.
-        
+
         This is a security best practice to minimize the window of exposure
         for sensitive cryptographic material in memory. While Python's garbage
         collector may still leave copies in memory, this reduces the risk.
-        
+
         After calling cleanup(), this KeyConfiguration instance should not be used.
         """
         # Overwrite key with zeros

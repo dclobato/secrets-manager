@@ -19,7 +19,7 @@ from .utils import normalize_salt, normalize_version
 
 class AtomicCounter:
     """Thread-safe counter for statistics tracking.
-    
+
     Uses a lock to ensure atomic increment and read operations,
     preventing race conditions under concurrent access.
     """
@@ -36,7 +36,7 @@ class AtomicCounter:
 
     def value(self) -> int:
         """Atomically read the current counter value.
-        
+
         Returns:
             int: Current counter value
         """
@@ -165,7 +165,7 @@ class SecretsManager:
         # Convert string key to bytearray for secure memory management
         key_str = config_dict["key"]
         key_bytearray = bytearray(key_str.encode("utf-8"))
-        
+
         key_config = KeyConfiguration(
             version=version,
             key=key_bytearray,
@@ -488,28 +488,28 @@ class SecretsManager:
 
     def cleanup(self) -> None:
         """Securely clear sensitive data from memory.
-        
+
         SECURITY: This method performs the following cleanup operations:
         1. Calls cleanup() on all cached KeyConfiguration instances to zero keys
         2. Clears all caches (config and Fernet instances)
         3. Forces garbage collection to reclaim memory
-        
+
         WHY THIS MATTERS:
         - Minimizes the window of exposure for cryptographic keys in memory
         - Reduces risk of key exposure in memory dumps or swap files
         - Best practice before shutdown or after key rotation
-        
+
         PYTHON GC LIMITATIONS:
         - Python's garbage collector may leave copies of data in memory
         - This is "best-effort" security, not a guarantee
         - However, it significantly reduces the attack surface
-        
+
         WHEN TO CALL:
         - Before shutting down your application
         - After key rotation in high-security environments
         - When disposing of SecretsManager instances
         - In finally blocks or context manager __exit__ methods
-        
+
         Example:
             >>> manager = SecretsManager(config)
             >>> try:
@@ -522,12 +522,12 @@ class SecretsManager:
             # Securely zero all cached keys
             for key_config in self._config_cache.values():
                 key_config.cleanup()
-            
+
             # Clear all caches
             self._config_cache.clear()
             self._fernet_cache.clear()
-        
+
         # Force garbage collection to reclaim memory
         gc.collect()
-        
+
         self._logger.info("Sensitive data securely cleared from memory")
