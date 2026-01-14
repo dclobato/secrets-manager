@@ -10,14 +10,14 @@ from typing import Any, Callable, Dict, Optional, Self
 class KeyConfiguration:
     """Configuração imutável e validada de uma versão de chave.
 
-    SECURITY NOTE: This class uses bytearray instead of str for the cryptographic key
-    to enable secure memory cleanup. Unlike str (which is immutable in Python),
-    bytearray is mutable and can be zeroed out when no longer needed, reducing the
-    window where sensitive key material remains in memory.
+    NOTA DE SEGURANÇA: Esta classe usa bytearray ao invés de str para a chave criptográfica
+    para permitir limpeza segura de memória. Diferente de str (que é imutável em Python),
+    bytearray é mutável e pode ser zerado quando não for mais necessário, reduzindo a
+    janela onde material de chave sensível permanece na memória.
 
-    While Python's garbage collector may still leave copies in memory (due to internal
-    string interning, reference counting, etc.), using bytearray provides best-effort
-    security by allowing explicit cleanup via the cleanup() method.
+    Embora o coletor de lixo do Python ainda possa deixar cópias na memória (devido a
+    internação de strings, contagem de referências, etc.), usar bytearray fornece segurança
+    de melhor esforço ao permitir limpeza explícita via método cleanup().
 
     Attributes:
         version: Nome da versão (e.g., "v1", "v2")
@@ -42,31 +42,32 @@ class KeyConfiguration:
                 )
 
     def cleanup(self) -> None:
-        """Securely zero out the encryption key in memory.
+        """Zera de forma segura a chave de criptografia na memória.
 
-        SECURITY NOTE: This method overwrites the key bytearray with zeros
-        to minimize the time sensitive cryptographic material remains in memory.
+        NOTA DE SEGURANÇA: Este método sobrescreve o bytearray da chave com zeros
+        para minimizar o tempo que material criptográfico sensível permanece na memória.
 
-        Call this method when:
-        - The application is shutting down
-        - After key rotation (for old keys)
-        - When the key is no longer needed
+        Chame este método quando:
+        - A aplicação estiver sendo encerrada
+        - Após rotação de chaves (para chaves antigas)
+        - Quando a chave não for mais necessária
 
-        IMPORTANT: This is best-effort security in Python. Due to:
-        - Python's reference counting and garbage collector
-        - Potential string interning during bytearray creation
-        - Memory manager optimizations
-        - Operating system memory management
+        IMPORTANTE: Esta é segurança de melhor esforço em Python. Devido a:
+        - Contagem de referências e coletor de lixo do Python
+        - Potencial internação de strings durante criação do bytearray
+        - Otimizações do gerenciador de memória
+        - Gerenciamento de memória do sistema operacional
 
-        There's no guarantee that all copies of the key material are removed
-        from memory. However, this significantly reduces the attack surface
-        compared to using immutable str objects.
+        Não há garantia de que todas as cópias do material de chave sejam removidas
+        da memória. No entanto, isto reduz significativamente a superfície de ataque
+        comparado ao uso de objetos str imutáveis.
 
-        After calling cleanup(), this KeyConfiguration instance should not be used.
+        Após chamar cleanup(), esta instância KeyConfiguration não deve ser usada.
         """
-        # Zero out the bytearray in place
-        # Note: bytearray is mutable, so we can modify its contents even in a frozen dataclass
-        # The frozen attribute only prevents reassigning the reference, not modifying the object
+        # Zera o bytearray no local
+        # Nota: bytearray é mutável, então podemos modificar seu conteúdo mesmo
+        # em um dataclass frozen. O atributo frozen apenas previne reatribuir a
+        # referência, não modificar o objeto
         if self.key:
             for i in range(len(self.key)):
                 self.key[i] = 0

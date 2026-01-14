@@ -24,36 +24,36 @@ class SecretsManagerError(Exception):
 
 
 class AtomicCounter:
-    """Thread-safe counter for statistics tracking.
+    """Contador thread-safe para rastreamento de estatísticas.
 
-    SECURITY NOTE: This class provides atomic increment and read operations
-    to prevent race conditions when updating statistics under concurrent access.
-    Without locking, the increment operation (read-modify-write) could lose
-    updates when multiple threads access the same counter simultaneously.
+    NOTA DE SEGURANÇA: Esta classe fornece operações atômicas de incremento e leitura
+    para prevenir condições de corrida ao atualizar estatísticas sob acesso concorrente.
+    Sem bloqueio, a operação de incremento (ler-modificar-escrever) poderia perder
+    atualizações quando múltiplas threads acessam o mesmo contador simultaneamente.
     """
 
     def __init__(self) -> None:
-        """Initialize counter at zero with a lock for synchronization."""
+        """Inicializa contador em zero com um lock para sincronização."""
         self._value = 0
         self._lock = Lock()
 
     def increment(self) -> None:
-        """Atomically increment the counter by 1.
+        """Incrementa atomicamente o contador em 1.
 
-        This method is thread-safe and ensures no updates are lost
-        even under high concurrency.
+        Este método é thread-safe e garante que nenhuma atualização seja perdida
+        mesmo sob alta concorrência.
         """
         with self._lock:
             self._value += 1
 
     def value(self) -> int:
-        """Atomically read the current counter value.
+        """Lê atomicamente o valor atual do contador.
 
         Returns:
-            int: Current counter value
+            int: Valor atual do contador
 
-        This method is thread-safe and guarantees a consistent
-        snapshot of the counter value.
+        Este método é thread-safe e garante uma captura consistente
+        do valor do contador.
         """
         with self._lock:
             return self._value
@@ -170,9 +170,9 @@ class SecretsManager:
         if salt_hash:
             self._stats["integrity_checks"].increment()
 
-        # SECURITY NOTE: Convert string key to bytearray for secure memory cleanup
-        # The key starts as a string from config, but we convert it to bytearray
-        # to allow zeroing the memory when cleanup() is called
+        # NOTA DE SEGURANÇA: Converte chave string para bytearray para limpeza segura de memória
+        # A chave começa como string da configuração, mas convertemos para bytearray
+        # para permitir zerar a memória quando cleanup() for chamado
         key_str = config_dict["key"]
         key_bytearray = bytearray(key_str.encode("utf-8"))
 
@@ -210,8 +210,8 @@ class SecretsManager:
     def _derive_fernet(self, key_config: KeyConfiguration) -> Fernet:
         """Deriva chave Fernet usando PBKDF2.
 
-        SECURITY NOTE: The key is stored as bytearray for secure cleanup.
-        We convert it to bytes for the KDF operation.
+        NOTA DE SEGURANÇA: A chave é armazenada como bytearray para limpeza segura.
+        Convertemos para bytes para a operação KDF.
 
         Args:
             key_config: Configuração da chave
@@ -225,7 +225,7 @@ class SecretsManager:
             salt=key_config.salt,
             iterations=self.config.kdf_iterations,
         )
-        # Convert bytearray to bytes for KDF
+        # Converte bytearray para bytes para KDF
         key_bytes = bytes(key_config.key)
         derived = kdf.derive(key_bytes)
         fernet_key = base64.urlsafe_b64encode(derived)
@@ -495,50 +495,53 @@ class SecretsManager:
         self._logger.debug("Caches limpos")
 
     def cleanup(self) -> None:
-        """Securely cleanup sensitive cryptographic material from memory.
+        """Limpa de forma segura material criptográfico sensível da memória.
 
-        SECURITY NOTE: This method performs best-effort cleanup of sensitive key
-        material from memory by:
-        1. Calling cleanup() on all cached KeyConfiguration instances to zero their keys
-        2. Clearing all caches (config and Fernet instances)
-        3. Forcing garbage collection to reclaim memory
+        NOTA DE SEGURANÇA: Este método realiza limpeza de melhor esforço de material
+        de chave sensível da memória através de:
+        1. Chamar cleanup() em todas as instâncias KeyConfiguration em cache para zerar suas chaves
+        2. Limpar todos os caches (configurações e instâncias Fernet)
+        3. Forçar coleta de lixo para recuperar memória
 
-        Call this method when:
-        - Application is shutting down
-        - After key rotation (to clean up old keys)
-        - Periodically as part of security hardening
+        Chame este método quando:
+        - Aplicação estiver sendo encerrada
+        - Após rotação de chaves (para limpar chaves antigas)
+        - Periodicamente como parte do enrijecimento de segurança
 
-        IMPORTANT LIMITATIONS:
-        - Python's memory management may keep copies of strings in memory
-        - The garbage collector doesn't guarantee immediate memory reclamation
-        - Operating system may cache memory pages
-        - This provides defense-in-depth but is not foolproof
+        LIMITAÇÕES IMPORTANTES:
+        - Gerenciamento de memória do Python pode manter cópias de strings na memória
+        - O coletor de lixo não garante recuperação imediata de memória
+        - Sistema operacional pode cachear páginas de memória
+        - Isto fornece defesa em profundidade mas não é à prova de falhas
 
-        Best practices:
-        - Call cleanup() before application shutdown
-        - After cleanup(), create a new SecretsManager instance if needed
-        - Consider memory encryption at OS level for additional security
+        Melhores práticas:
+        - Chamar cleanup() antes do encerramento da aplicação
+        - Após cleanup(), criar uma nova instância de SecretsManager se necessário
+        - Considerar criptografia de memória a nível de SO para segurança adicional
 
-        Example:
+        Exemplo:
             >>> manager = SecretsManager(config)
-            >>> # ... use manager for encryption/decryption ...
-            >>> manager.cleanup()  # Before shutdown or key rotation
+            >>> # ... usar manager para criptografia/descriptografia ...
+            >>> manager.cleanup()  # Antes de encerrar ou rotacionar chaves
         """
         with self._lock:
-            # Zero out keys in all cached configurations
+            # Zera chaves em todas as configurações em cache
             for key_config in self._config_cache.values():
                 try:
                     key_config.cleanup()
                 except Exception as e:
                     self._logger.warning(
-                        f"Error cleaning up key config for version {key_config.version}: {e}"
+                        f"Erro ao limpar configuração de chave para versão "
+                        f"{key_config.version}: {e}"
                     )
 
-            # Clear all caches
+            # Limpa todos os caches
             self._config_cache.clear()
             self._fernet_cache.clear()
 
-        # Force garbage collection to reclaim memory
+        # Força coleta de lixo para recuperar memória
         gc.collect()
 
-        self._logger.info("Security cleanup completed: all cached keys zeroed and caches cleared")
+        self._logger.info(
+            "Limpeza de segurança concluída: todas as chaves em cache zeradas e caches limpos"
+        )
