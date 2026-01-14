@@ -141,6 +141,11 @@ def main():
         indicator = "← ATIVA" if v == manager.get_active_version() else ""
         print(f"   - {v} {indicator}")
 
+    # 13. Limpar material criptográfico sensível
+    print("\n13. Limpando material sensível da memória...")
+    manager.cleanup()
+    print("   ✓ Limpeza de segurança concluída")
+
     # Cleanup
     if env_file.exists():
         os.remove(env_file)
