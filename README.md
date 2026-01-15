@@ -165,7 +165,7 @@ See `examples/env_file_usage.py` for a complete runnable example.
 
 - `.env` files store keys in plain text; do not version them in git.
 - Prefer environment variables for production deployments.
-- Rotate keys regularmente e mantenha backup seguro de versões antigas para fallback.
+- Rotate keys regularly and keep secure backups of older versions for fallback..
 
 ## .env Parsing Notes
 
