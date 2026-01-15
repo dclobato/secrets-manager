@@ -1,0 +1,40 @@
+name: Build dist on release
+
+on:
+  release:
+    types: [published]  # runs when you click "Publish release" in GitHub
+
+permissions:
+  contents: write  # required to upload assets to the GitHub Release
+
+jobs:
+  build-dist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+      - uses: actions/checkout@v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7.2.0
+        with:
+          version: "latest"
+          activate-environment: true
+          
+      - name: Build distributions
+        run: |
+          uv sync --frozen
+          make build
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: dist-${{ github.ref_name }}
+          path: dist/*
+
+      - name: Attach dist files to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
