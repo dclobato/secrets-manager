@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "SecretsManager"
-version = "0.1.0"
+version = "1.0.0"
 description = "Thread-safe secrets manager with Fernet encryption and key rotation"
 readme = "README.md"
 authors = [
@@ -27,6 +27,7 @@ keywords = ["encryption", "fernet", "secrets", "key-rotation", "pbkdf2", "crypto
 requires-python = ">=3.11"
 dependencies = [
     "cryptography>=41.0.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -83,3 +84,6 @@ addopts = [
     "--cov-report=html",
     "--cov-fail-under=90",
 ]
+
+[tool.coverage.run]
+disable_warnings = ["module-not-measured"]

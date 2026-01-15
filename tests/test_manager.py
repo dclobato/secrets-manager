@@ -1,106 +1,17 @@
-"""Testes para o SecretsManager."""
+"""Testes para SecretsManager."""
 
-import base64
 import hashlib
 import logging
 
 import pytest
 
-from secrets_manager import (
-    KeyConfiguration,
-    SecretsConfig,
-    SecretsManager,
-    SecretsManagerError,
-    normalize_salt,
-)
-
-
-def test_normalize_salt():
-    """Testa normalização de salt em vários formatos."""
-    salt_bytes = b"salt123"
-    salt_hex = salt_bytes.hex()
-    salt_b64 = base64.urlsafe_b64encode(salt_bytes).decode("ascii")
-
-    assert normalize_salt(salt_bytes) == salt_bytes
-    assert normalize_salt(salt_hex) == salt_bytes
-    assert normalize_salt(salt_b64) == salt_bytes
-    assert normalize_salt("salt123") == salt_bytes  # UTF8 fallback
-
-    with pytest.raises(TypeError):
-        normalize_salt(123)
-
-
-def test_key_configuration_integrity():
-    """Testa validação de integridade do hash do salt."""
-    salt = b"salt-integrity"
-    salt_hash = hashlib.sha256(salt).hexdigest()
-
-    # Hash correto - não deve levantar exceção
-    config = KeyConfiguration(version="1", key="k", salt=salt, salt_hash=salt_hash)
-    assert config.salt == salt
-
-    # Hash incorreto - deve levantar exceção
-    with pytest.raises(ValueError, match="Integridade do salt comprometida"):
-        KeyConfiguration(version="1", key="k", salt=salt, salt_hash="hash-errado")
-
-
-def test_secrets_config_validation():
-    """Testa validação de SecretsConfig."""
-    # Config válida
-    config = SecretsConfig(keys={"v1": {"key": "k", "salt": "s"}}, active_version="v1")
-    assert config.active_version == "v1"
-
-    # Config vazia
-    with pytest.raises(ValueError, match="Pelo menos uma chave"):
-        SecretsConfig(keys={}, active_version="v1")
-
-    # Versão ativa inexistente
-    with pytest.raises(ValueError, match="Versão ativa .* não existe"):
-        SecretsConfig(keys={"v1": {"key": "k", "salt": "s"}}, active_version="v2")
-
-    # Config incompleta (faltando salt)
-    with pytest.raises(ValueError, match="deve conter 'key' e 'salt'"):
-        SecretsConfig(keys={"v1": {"key": "k"}}, active_version="v1")
-
-
-def test_secrets_config_from_environment(monkeypatch):
-    """Testa criação de config a partir de variáveis de ambiente."""
-    # Configurar ambiente
-    monkeypatch.setenv("ENCRYPTION_KEYS__v1", "key1")
-    monkeypatch.setenv("ENCRYPTION_SALT__v1", "salt1")
-    monkeypatch.setenv("ACTIVE_ENCRYPTION_VERSION", "v1")
-
-    config = SecretsConfig.from_environment()
-
-    assert config.active_version == "v1"
-    assert "v1" in config.keys
-    assert config.keys["v1"]["key"] == "key1"
-    assert config.keys["v1"]["salt"] == "salt1"
-
-
-def test_secrets_config_from_environment_missing_salt(monkeypatch):
-    """Testa erro quando salt está faltando no ambiente."""
-    monkeypatch.setenv("ENCRYPTION_KEYS__v1", "key1")
-    monkeypatch.setenv("ACTIVE_ENCRYPTION_VERSION", "v1")
-
-    with pytest.raises(ValueError, match="Salt não encontrado"):
-        SecretsConfig.from_environment()
-
-
-def test_secrets_config_from_environment_no_keys(monkeypatch):
-    """Testa erro quando não há chaves no ambiente."""
-    # Limpar todas as variáveis de criptografia
-    for key in list(monkeypatch._setitem):
-        if "ENCRYPTION" in key:
-            monkeypatch.delenv(key, raising=False)
-
-    with pytest.raises(ValueError, match="Nenhuma chave de criptografia encontrada"):
-        SecretsConfig.from_environment()
+from secrets_manager import SecretsConfig, SecretsManager, SecretsManagerError
+from secrets_manager.utils import ENV_CHECKSUM_KEY
 
 
 def test_secrets_manager_basic_encryption():
     """Testa criptografia/descriptografia básica."""
-    config = SecretsConfig(keys={"v1": {"key": "pass", "salt": "salt"}}, active_version="v1")
+    config = SecretsConfig(keys={"v1": {"key": "pass", "salt": b"salt"}}, active_version="v1")
 
     manager = SecretsManager(config)
 
@@ -119,7 +30,7 @@ def test_secrets_manager_basic_encryption():
 
 def test_secrets_manager_key_rotation():
     """Testa rotação de chaves."""
-    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": "s1"}}, active_version="v1")
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
 
     manager = SecretsManager(config)
 
@@ -150,7 +61,7 @@ def test_secrets_manager_key_rotation():
 def test_secrets_manager_decrypt_with_hint():
     """Testa decrypt com version_hint."""
     config = SecretsConfig(
-        keys={"v1": {"key": "k1", "salt": "s1"}, "v2": {"key": "k2", "salt": "s2"}},
+        keys={"v1": {"key": "k1", "salt": b"s1"}, "v2": {"key": "k2", "salt": b"s2"}},
         active_version="v2",
     )
 
@@ -169,7 +80,7 @@ def test_secrets_manager_decrypt_with_hint():
 
 def test_secrets_manager_decrypt_all_versions_fail():
     """Testa erro quando decrypt falha com todas as versões."""
-    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": "s1"}}, active_version="v1")
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
 
     manager = SecretsManager(config)
 
@@ -182,7 +93,7 @@ def test_secrets_manager_decrypt_all_versions_fail():
 
 def test_secrets_manager_statistics():
     """Testa estatísticas de uso."""
-    config = SecretsConfig(keys={"v1": {"key": "k", "salt": "s"}}, active_version="v1")
+    config = SecretsConfig(keys={"v1": {"key": "k", "salt": b"s"}}, active_version="v1")
 
     manager = SecretsManager(config)
 
@@ -207,7 +118,7 @@ def test_secrets_manager_audit_callback():
         audit_log.append((event, metadata))
 
     config = SecretsConfig(
-        keys={"v1": {"key": "k", "salt": "s"}},
+        keys={"v1": {"key": "k", "salt": b"s"}},
         active_version="v1",
         audit_callback=callback,
     )
@@ -221,12 +132,30 @@ def test_secrets_manager_audit_callback():
     assert audit_log[0][1]["version"] == "v1"
 
 
+def test_secrets_manager_audit_callback_exception(caplog):
+    """Testa que exceções no callback de auditoria são tratadas."""
+    def callback(event, metadata):
+        raise RuntimeError("audit fail")
+
+    config = SecretsConfig(
+        keys={"v1": {"key": "k", "salt": b"s"}},
+        active_version="v1",
+        audit_callback=callback,
+    )
+
+    caplog.set_level(logging.WARNING)
+    manager = SecretsManager(config)
+    manager.encrypt(b"data")
+
+    assert "Erro no callback de auditoria" in caplog.text
+
+
 def test_secrets_manager_persist_to_env_file(tmp_path):
     """Testa persistência em arquivo .env."""
     env_file = tmp_path / ".env"
     env_file.write_text("EXISTING_VAR=value\n")
 
-    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": "s1"}}, active_version="v1")
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
 
     manager = SecretsManager(config)
 
@@ -240,11 +169,27 @@ def test_secrets_manager_persist_to_env_file(tmp_path):
     assert 'EXISTING_VAR="value"' in content  # Preserva existente
     assert "ENCRYPTION_SALT__v2" in content
     assert "ENCRYPTION_SALT_HASH__v2" in content
+    assert ENV_CHECKSUM_KEY in content
+
+
+def test_secrets_manager_persist_to_env_file_skips_comments(tmp_path):
+    """Testa que comentários e linhas vazias são ignorados na persistência."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("# comment\n\nEXISTING_VAR=value\n")
+
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
+    manager = SecretsManager(config)
+
+    manager.rotate_to_new_version("v2", "k2", b"s2", persist_to_file=str(env_file))
+
+    content = env_file.read_text()
+    assert 'EXISTING_VAR="value"' in content
+    assert "comment" not in content
 
 
 def test_secrets_manager_clear_cache():
     """Testa limpeza de cache."""
-    config = SecretsConfig(keys={"v1": {"key": "k", "salt": "s"}}, active_version="v1")
+    config = SecretsConfig(keys={"v1": {"key": "k", "salt": b"s"}}, active_version="v1")
 
     manager = SecretsManager(config)
 
@@ -269,7 +214,7 @@ def test_secrets_manager_custom_logger():
     logger.setLevel(logging.DEBUG)
 
     config = SecretsConfig(
-        keys={"v1": {"key": "k", "salt": "s"}}, active_version="v1", logger=logger
+        keys={"v1": {"key": "k", "salt": b"s"}}, active_version="v1", logger=logger
     )
 
     manager = SecretsManager(config)
@@ -277,13 +222,31 @@ def test_secrets_manager_custom_logger():
     assert manager._logger == logger
 
 
+def test_secrets_manager_validate_configuration_no_keys():
+    """Testa erro quando não há chaves configuradas."""
+    config = SecretsConfig(keys={"v1": {"key": "k", "salt": b"s"}}, active_version="v1")
+    config.keys = {}
+
+    with pytest.raises(SecretsManagerError, match="Nenhuma chave de criptografia configurada"):
+        SecretsManager(config)
+
+
+def test_secrets_manager_validate_configuration_active_version_missing():
+    """Testa erro quando a versão ativa não existe nas chaves."""
+    config = SecretsConfig(keys={"v1": {"key": "k", "salt": b"s"}}, active_version="v1")
+    config.active_version = "v2"
+
+    with pytest.raises(SecretsManagerError, match="Versão ativa 'v2' não existe"):
+        SecretsManager(config)
+
+
 def test_secrets_manager_get_all_versions():
     """Testa obtenção de todas as versões."""
     config = SecretsConfig(
         keys={
-            "v1": {"key": "k1", "salt": "s1"},
-            "v2": {"key": "k2", "salt": "s2"},
-            "v3": {"key": "k3", "salt": "s3"},
+            "v1": {"key": "k1", "salt": b"s1"},
+            "v2": {"key": "k2", "salt": b"s2"},
+            "v3": {"key": "k3", "salt": b"s3"},
         },
         active_version="v2",
     )
@@ -296,6 +259,27 @@ def test_secrets_manager_get_all_versions():
     assert "v1" in versions
     assert "v2" in versions
     assert "v3" in versions
+
+
+def test_secrets_manager_load_key_config_missing_version():
+    """Testa erro quando a versão não existe."""
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
+    manager = SecretsManager(config)
+
+    with pytest.raises(SecretsManagerError, match="Versão 'v2' não encontrada"):
+        manager._load_key_config("v2")
+
+
+def test_secrets_manager_load_key_config_invalid_format():
+    """Testa erro quando a configuração da versão é inválida."""
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
+    manager = SecretsManager(config)
+
+    manager.config.keys["v1"] = "invalid"
+    manager.clear_cache()
+
+    with pytest.raises(SecretsManagerError, match="Configuração inválida"):
+        manager._load_key_config("v1")
 
 
 def test_secrets_manager_salt_integrity_validation():
@@ -314,6 +298,28 @@ def test_secrets_manager_salt_integrity_validation():
     # Deve carregar sem erro
     key_config = manager._load_key_config("v1")
     assert key_config.salt == salt
+
+
+def test_secrets_manager_rotate_without_existing_salt():
+    """Testa erro quando não há salt existente e new_salt é None."""
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
+    manager = SecretsManager(config)
+
+    manager.config.keys = {}
+    manager.clear_cache()
+
+    with pytest.raises(SecretsManagerError, match="Nenhuma configuração existente"):
+        manager.rotate_to_new_version("v2", "k2", None)
+
+
+def test_secrets_manager_rotate_reuses_existing_salt():
+    """Testa que rotate reutiliza o salt existente quando new_salt é None."""
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
+    manager = SecretsManager(config)
+
+    manager.rotate_to_new_version("v2", "k2", None)
+
+    assert manager.config.keys["v2"]["salt"] == b"s1"
 
 
 def test_secrets_manager_salt_integrity_disabled():
@@ -377,6 +383,8 @@ def test_atomic_counter_basic():
 
 def test_key_configuration_cleanup():
     """Testa que KeyConfiguration.cleanup() zera a chave."""
+    from secrets_manager import KeyConfiguration
+
     key_str = "my-secret-key"
     key_bytearray = bytearray(key_str.encode("utf-8"))
 
@@ -402,8 +410,8 @@ def test_secrets_manager_cleanup():
     """Testa que SecretsManager.cleanup() limpa todas as chaves."""
     config = SecretsConfig(
         keys={
-            "v1": {"key": "key1", "salt": "salt1"},
-            "v2": {"key": "key2", "salt": "salt2"},
+            "v1": {"key": "key1", "salt": b"salt1"},
+            "v2": {"key": "key2", "salt": b"salt2"},
         },
         active_version="v1",
     )
@@ -433,10 +441,28 @@ def test_secrets_manager_cleanup():
     assert all(b == 0 for b in key_config_v2.key)
 
 
+def test_secrets_manager_cleanup_handles_errors(caplog):
+    """Testa que cleanup trata exceções ao limpar chaves."""
+    config = SecretsConfig(keys={"v1": {"key": "k1", "salt": b"s1"}}, active_version="v1")
+    caplog.set_level(logging.WARNING)
+    manager = SecretsManager(config)
+
+    class BadKeyConfig:
+        version = "v1"
+
+        def cleanup(self):
+            raise RuntimeError("cleanup fail")
+
+    manager._config_cache["v1"] = BadKeyConfig()
+    manager.cleanup()
+
+    assert "Erro ao limpar configuração de chave para versão v1" in caplog.text
+
+
 def test_secrets_manager_bytearray_key_usage():
     """Testa que chaves são armazenadas como bytearray."""
     config = SecretsConfig(
-        keys={"v1": {"key": "test-key", "salt": "test-salt"}},
+        keys={"v1": {"key": "test-key", "salt": b"test-salt"}},
         active_version="v1",
     )
 

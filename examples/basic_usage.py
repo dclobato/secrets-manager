@@ -22,7 +22,7 @@ def main():
         keys={
             "v1": {
                 "key": "my-secret-password",
-                "salt": "random-salt-value",  # Em produção, use salt aleatório
+                "salt": b"random-salt-value",  # Em produção, use salt aleatório (bytes)
             }
         },
         active_version="v1",

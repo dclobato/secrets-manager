@@ -1,7 +1,86 @@
 """Funções auxiliares para o SecretsManager."""
 
+import hashlib
+import os
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Dict, Iterator, Mapping, TextIO
+
 import base64
-from typing import Any
+
+from dotenv import dotenv_values
+
+
+ENV_CHECKSUM_KEY = "ENCRYPTION_ENV_CHECKSUM"
+
+
+def escape_env_value(value: str) -> str:
+    """Escapa valores para escrita segura em arquivos .env."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def compute_env_checksum(values: Mapping[str, str]) -> str:
+    """Calcula checksum SHA256 determinístico para um mapeamento .env."""
+    items = []
+    for key in sorted(values):
+        if key == ENV_CHECKSUM_KEY:
+            continue
+        value = values.get(key)
+        if value is None:
+            continue
+        items.append(f"{key}={value}")
+    payload = "\n".join(items).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def parse_env_stream(stream: TextIO) -> Dict[str, str]:
+    """Parseia um stream .env usando python-dotenv."""
+    data = dotenv_values(stream=stream)
+    return {key: value for key, value in data.items() if value is not None}
+
+
+def parse_env_file(path: Path) -> Dict[str, str]:
+    """Parseia um arquivo .env usando python-dotenv."""
+    with path.open("r", encoding="utf-8", errors="strict") as f:
+        return parse_env_stream(f)
+
+
+def _lock_file(file_handle: TextIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        file_handle.seek(0)
+        msvcrt.locking(file_handle.fileno(), msvcrt.LK_LOCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(file_handle.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(file_handle: TextIO) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        file_handle.seek(0)
+        msvcrt.locking(file_handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(file_handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def locked_file(path: Path) -> Iterator[TextIO]:
+    """Abre o arquivo e aplica lock exclusivo enquanto estiver em uso."""
+    file_handle = path.open("a+", encoding="utf-8", errors="strict")
+    _lock_file(file_handle)
+    try:
+        yield file_handle
+    finally:
+        _unlock_file(file_handle)
+        file_handle.close()
 
 
 def normalize_salt(salt: Any) -> bytes:

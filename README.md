@@ -49,7 +49,7 @@ config = SecretsConfig(
     keys={
         "v1": {
             "key": "my-secret-password",
-            "salt": "random-salt-value",
+            "salt": b"random-salt-value",
         }
     },
     active_version="v1",
@@ -67,7 +67,7 @@ version, plaintext = manager.decrypt(ciphertext)
 from secrets_manager import SecretsConfig, SecretsManager
 
 config = SecretsConfig(
-    keys={"v1": {"key": "old-password", "salt": "old-salt"}},
+    keys={"v1": {"key": "old-password", "salt": b"old-salt"}},
     active_version="v1",
 )
 
@@ -109,7 +109,7 @@ def audit_callback(event: str, metadata: dict):
     print(f"[AUDIT] {event}: {metadata}")
 
 config = SecretsConfig(
-    keys={"v1": {"key": "pass", "salt": "salt"}},
+    keys={"v1": {"key": "pass", "salt": b"salt"}},
     active_version="v1",
     audit_callback=audit_callback,
 )
@@ -131,6 +131,48 @@ manager.rotate_to_new_version(
     persist_to_file=".env.secrets",
 )
 ```
+
+### Environment File Load/Save
+
+```python
+from secrets_manager import SecretsConfig, SecretsManager
+
+config = SecretsConfig(
+    keys={"v1": {"key": "my-key", "salt": b"my-salt"}},
+    active_version="v1",
+)
+config.to_file(".env.secrets")
+
+loaded = SecretsConfig.from_file(".env.secrets")
+manager = SecretsManager(loaded)
+```
+
+Note: `salt` should be passed as `bytes` in code. When persisted to `.env`, salts are stored
+in base64; `from_file()`/`from_environment()` normalize them back to `bytes`.
+
+Example (visual):
+```python
+config = SecretsConfig(keys={"v1": {"key": "k", "salt": b"my-salt"}}, active_version="v1")
+```
+
+```
+ENCRYPTION_SALT__v1="bXktc2FsdA=="
+```
+
+See `examples/env_file_usage.py` for a complete runnable example.
+
+## Security Notes
+
+- `.env` files store keys in plain text; do not version them in git.
+- Prefer environment variables for production deployments.
+- Rotate keys regularmente e mantenha backup seguro de versões antigas para fallback.
+
+## .env Parsing Notes
+
+- `from_file()` uses `python-dotenv` for robust parsing of quoted values and `#` inside values.
+- `to_file(append=True)` uses a best-effort file lock; it is not guaranteed to be thread-safe
+  or process-safe on all filesystems.
+- `to_file()` writes `ENCRYPTION_ENV_CHECKSUM`; `from_file()` validates it when present.
 
 ## Configuration Options
 

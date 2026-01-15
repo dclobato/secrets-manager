@@ -14,7 +14,15 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .config import KeyConfiguration, SecretsConfig
-from .utils import normalize_salt, normalize_version
+from .utils import (
+    ENV_CHECKSUM_KEY,
+    compute_env_checksum,
+    escape_env_value,
+    locked_file,
+    normalize_salt,
+    normalize_version,
+    parse_env_stream,
+)
 
 
 class SecretsManagerError(Exception):
@@ -401,7 +409,7 @@ class SecretsManager:
 
         self.config.keys[new_version_normalized] = {
             "key": new_key,
-            "salt": base64.urlsafe_b64encode(new_salt).decode("ascii"),
+            "salt": normalize_salt(new_salt),
         }
         self.config.active_version = new_version_normalized
 
@@ -430,31 +438,27 @@ class SecretsManager:
         data = {}
         env_path = Path(filename)
 
-        # Ler arquivo existente
-        if env_path.exists():
-            with env_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        data[k.strip()] = v.strip().strip('"').strip("'")
+        with locked_file(env_path) as f:
+            f.seek(0)
+            data.update(parse_env_stream(f))
 
-        # Adicionar/atualizar nova versão
-        data[f"ENCRYPTION_KEYS__{version}"] = key
-        data[f"ENCRYPTION_SALT__{version}"] = base64.urlsafe_b64encode(salt).decode("ascii")
-        data["ACTIVE_ENCRYPTION_VERSION"] = version
+            # Adicionar/atualizar nova versão
+            data[f"ENCRYPTION_KEYS__{version}"] = key
+            data[f"ENCRYPTION_SALT__{version}"] = base64.urlsafe_b64encode(salt).decode("ascii")
+            data["ACTIVE_ENCRYPTION_VERSION"] = version
 
-        # Calcular hash do salt para integridade
-        salt_hash = hashlib.sha256(salt).hexdigest()
-        data[f"ENCRYPTION_SALT_HASH__{version}"] = salt_hash
+            # Calcular hash do salt para integridade
+            salt_hash = hashlib.sha256(salt).hexdigest()
+            data[f"ENCRYPTION_SALT_HASH__{version}"] = salt_hash
+            data[ENV_CHECKSUM_KEY] = compute_env_checksum(data)
 
-        # Escrever de volta
-        with env_path.open("w", encoding="utf-8") as f:
-            f.write(f"# Atualizado em {datetime.now(timezone.utc).isoformat()}\n")
+            # Escrever de volta
+            f.seek(0)
+            f.truncate()
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+            f.write(f"# Atualizado em {timestamp}\n")
             for k, v in sorted(data.items()):
-                f.write(f'{k}="{v}"\n')
+                f.write(f'{k}="{escape_env_value(v)}"\n')
 
         self._logger.info(f"Configuração persistida em: {filename}")
 

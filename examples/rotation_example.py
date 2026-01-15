@@ -21,7 +21,7 @@ def main():
     # 1. Configuração inicial com v1
     print("1. Configuração inicial com versão v1...")
     config = SecretsConfig(
-        keys={"v1": {"key": "old-password", "salt": "old-salt"}},
+        keys={"v1": {"key": "old-password", "salt": b"old-salt"}},
         active_version="v1",
         logger=logger,
     )
