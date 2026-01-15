@@ -3,6 +3,7 @@ name: Build dist on release
 on:
   release:
     types: [published]  # runs when you click "Publish release" in GitHub
+  workflow_dispatch:
 
 permissions:
   contents: write  # required to upload assets to the GitHub Release
