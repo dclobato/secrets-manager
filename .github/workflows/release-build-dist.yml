@@ -2,16 +2,16 @@ name: Build dist on release
 
 on:
   release:
-    types: [published]  # runs when you click "Publish release" in GitHub
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
         description: "Tag to build from (example: v1.0.0). Leave empty to build the default branch and skip release upload."
         required: false
         type: string
-        
+
 permissions:
-  contents: write  # required to upload assets to the GitHub Release
+  contents: write
 
 jobs:
   build-dist:
@@ -30,7 +30,7 @@ jobs:
         with:
           version: "latest"
           activate-environment: true
-          
+
       - name: Build distributions
         run: |
           uv sync --frozen
@@ -39,12 +39,14 @@ jobs:
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v6.0.0
         with:
-          name: dist-${{ github.ref_name }}
+          name: dist-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
           path: dist/*
 
       - name: Attach dist files to GitHub Release
+        if: ${{ github.event_name == 'release' || inputs.tag != '' }}
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
           files: |
             dist/*.whl
             dist/*.tar.gz
